@@ -1,0 +1,40 @@
+# Node modules and dependencies
+node_modules/
+*.log
+bun.lockb
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+chat-frontend
+frontend/chat-frontend
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+# Environment and temporary files
+.env
+.env.local
+*.tmp
+*.temp
+context.txt
+
+# Build directories
+build/
+dist/
+out/

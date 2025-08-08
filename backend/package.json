@@ -1,0 +1,16 @@
+{
+  "name": "chat-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "~/.bun/bin/bun run server.ts",
+    "start": "~/.bun/bin/bun run server.ts"
+  },
+  "dependencies": {
+    "bun-types": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
