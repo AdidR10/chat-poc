@@ -5,6 +5,10 @@ A streaming chat application demonstrating OpenCode's real-time TUI architecture
 - **Frontend**: Go TUI powered by Bubble Tea and Lipgloss
 - **Communication**: Character-by-character streaming similar to AI chat interfaces
 
+## Demo Chat Flow
+https://github.com/user-attachments/assets/be8eb4e2-59bf-4469-8ad1-113a23355d48
+
+
 ## 🏗️ Architecture Overview
 
 This project replicates OpenCode's client-server streaming pattern:
