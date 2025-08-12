@@ -1,51 +1,56 @@
-# Chat POC - OpenCode Architecture Demo
+## Chat POC – OpenCode Architecture Demo
 
 A streaming chat application demonstrating OpenCode's real-time TUI architecture using modern tools:
-- **Backend**: Bun + TypeScript with streaming HTTP responses  
+- **Backend**: Bun + TypeScript with streaming HTTP responses and bash tool execution
 - **Frontend**: Go TUI powered by Bubble Tea and Lipgloss
 - **Communication**: Character-by-character streaming similar to AI chat interfaces
+- **Tool Calls**: Execute system commands directly from chat (like OpenCode's tool system)
+
+## Chat POC Demo
+![Terminal Demo](resources/demo.gif)
 
 ## 🏗️ Architecture Overview
 
-This project replicates OpenCode's client-server streaming pattern:
+This project replicates OpenCode's client-server streaming pattern with tool execution:
 
-```
+```text
 ┌─────────────────┐    HTTP POST /chat    ┌─────────────────┐
-│   Go Frontend   │◄─────────────────────►│ TypeScript      │
-│                 │                        │ Backend         │
-│ • Bubble Tea    │    Streaming chars     │                 │
-│ • Lipgloss      │    ←←←←←←←←←←←←←←←←    │ • Bun Server    │
-│ • Text Input    │                        │ • Port 3000     │
-│ • Chat History  │                        │ • /chat API     │
+│   Go Frontend   │◄─────────────────────►│   TypeScript     │
+│                 │                        │     Backend      │
+│ • Bubble Tea    │    Streaming chars     │ • Bun Server     │
+│ • Lipgloss      │    ←←←←←←←←←←←←←←←←    │ • Port 3000      │
+│ • Text Input    │                        │ • /chat API      │
+│ • Chat History  │                        │                  │
 └─────────────────┘                        └─────────────────┘
 ```
 
 ## ✨ Key Features
 
 - **🔄 Real-time Streaming**: Watch responses appear character-by-character like ChatGPT
-- **🎨 Beautiful Terminal UI**: Professional styling with borders, colors, and layouts  
+- **🎨 Beautiful Terminal UI**: Professional styling with borders, colors, and layouts
 - **📝 Chat History**: Persistent conversation with distinct user/bot message styling
+- **🔧 Tool Execution**: Run system commands from chat (`ls`, `pwd`, `df`, `uname`)
 - **⚡ Event-Driven**: Bubble Tea's reactive architecture for smooth interactions
 - **🛡️ Error Handling**: Graceful connection failures and stream interruptions
+- **🔒 Safe Execution**: Whitelisted commands only for security
 - **📱 Responsive Design**: Adapts to terminal window resizing
 
 ## 📁 Project Structure
 
-```
+```text
 chat-poc/
-├── backend/                 # Bun TypeScript server
-│   ├── package.json        # Dependencies: bun
-│   ├── server.ts           # HTTP server with streaming /chat endpoint
-│   └── node_modules/       # Auto-generated (ignored by git)
+├── backend/                  # Bun TypeScript server
+│   ├── package.json          # Dependencies: bun
+│   └── server.ts             # HTTP server with streaming /chat endpoint + tool execution
 │
-├── frontend/               # Go TUI application  
-│   ├── go.mod             # Dependencies: bubbletea, lipgloss
-│   ├── go.sum             # Dependency checksums
-│   ├── main.go            # Application entry point
-│   └── chat.go            # Core TUI implementation
+├── frontend/                 # Go TUI application
+│   ├── go.mod                # Dependencies: bubbletea, lipgloss
+│   ├── go.sum                # Dependency checksums
+│   ├── main.go               # Application entry point
+│   └── chat.go               # Core TUI implementation with tool display
 │
-├── .gitignore             # Excludes node_modules, binaries, logs
-└── README.md              # This documentation
+├── resources/                # Additional assets
+└── README.md                 # This documentation
 ```
 
 ## 🛠️ Prerequisites
@@ -54,57 +59,90 @@ Install these tools before running the project:
 
 | Tool | Version | Install |
 |------|---------|---------|
-| **Bun** | Latest | [bun.sh](https://bun.sh) - Fast JavaScript runtime |
-| **Go** | 1.21+ | [golang.org](https://golang.org) - Systems programming language |
+| **Bun** | Latest | [`bun.sh`](https://bun.sh) – Fast JavaScript runtime |
+| **Go** | 1.21+ | [`golang.org`](https://golang.org) – Systems programming language |
 
 ## 🚀 Quick Start
 
-### 1️⃣ Clone & Setup
+### 1. Clone the repo
+
 ```bash
 git clone <your-repo>
 cd chat-poc
 ```
 
-### 2️⃣ Backend Setup
+### 2. Backend setup
+
 ```bash
 cd backend
-bun install              # Install dependencies
-bun run dev             # Start development server
+bun install          # Install dependencies
+bun run dev          # Start development server
 ```
 
-✅ **Success output:**
-```
+Expected output (abridged):
+
+```text
 🚀 Chat server running on http://localhost:3000
-📡 Endpoints available:
-   GET  /health - Health check
-   POST /chat   - Send chat message (streams response)
+📡 Endpoints:
+  GET  /health
+  POST /chat
 ```
 
-### 3️⃣ Frontend Setup (new terminal)
+### 3. Frontend setup (new terminal)
+
 ```bash
 cd frontend
-go mod tidy             # Download Go dependencies  
-go run .                # Launch TUI application
+go mod tidy          # Download Go dependencies
+go run .             # Launch TUI application
 ```
 
 ## 🎮 How to Use
 
-1. **💬 Type your message** in the blue input box at the bottom
-2. **⏎ Press Enter** to send (input clears automatically)
-3. **👀 Watch magic happen**: Response streams in character-by-character
-4. **📜 Scroll through history**: See previous messages with color-coded borders
-5. **❌ Press Ctrl+C** to quit gracefully
+- **Basic chat**
+  - Type your message in the purple input box at the bottom
+  - Press Enter to send (input clears automatically)
+  - Responses stream in character-by-character
+  - Scroll through history with color-coded borders
+  - Press Ctrl+C to quit gracefully
 
-### UI Layout
+- **Tool commands** (try these):
+
+| Command | Triggers | What it does |
+|---|---|---|
+| List Files | "list files", "show files", "ls" | Shows directory contents with `ls -la` |
+| Current Directory | "current directory", "pwd" | Shows working directory with `pwd` |
+| Disk Usage | "disk usage", "df" | Shows disk space with `df -h` |
+| System Info | "system info", "uname" | Shows system details with `uname -a` |
+
+### Example chat session
+
+You: What files are in this directory?
+
+Bot: I'll execute the `ls` command for you...
+
+```text
+🔧 Executing: ls
+total 16
+drwxr-xr-x 4 user staff 128 Nov 15 10:30 .
+drwxr-xr-x 5 user staff 160 Nov 15 10:25 ..
+-rw-r--r-- 1 user staff 245 Nov 15 10:30 README.md
+drwxr-xr-x 3 user staff 96 Nov 15 10:28 backend
+drwxr-xr-x 3 user staff 96 Nov 15 10:28 frontend
 ```
-💬 Chat POC - OpenCode Architecture Demo
+
+Based on the output, I can see 5 items in the current directory.
+
+### UI layout with tool calls
+
+```text
+💬 Chat POC – OpenCode Architecture Demo
 
 ╭─────────────────────────────────────────╮
 │ You: Hello there!                       │  ← Green border (your messages)
 ╰─────────────────────────────────────────╯
 
 ╭─────────────────────────────────────────╮
-│ Bot: Hi! How can I help you today?      │  ← Red border (bot messages)  
+│ Bot: Hi! How can I help you today?      │  ← Red border (bot messages)
 ╰─────────────────────────────────────────╯
 
 ╭═════════════════════════════════════════╮
@@ -115,138 +153,236 @@ go run .                # Launch TUI application
 │ Type your message here...               │  ← Purple border (input)
 ╰─────────────────────────────────────────╯
 
+╭─────────────────────────────────────────╮
+│ You: Show me the files here             │
+╰─────────────────────────────────────────╯
+
+╭─────────────────────────────────────────╮
+│ Bot: I'll execute the ls command for    │
+│ you...                                  │
+│                                         │
+│ 🔧 Executing: ls                        │
+│ total 16                                │
+│ drwxr-xr-x  4 user  staff  128 ...      │
+│ -rw-r--r--  1 user  staff  245 ...      │
+│                                         │
+│ Based on the output, I can see 5 items  │
+│ in the current directory.               │
+╰─────────────────────────────────────────╯
+
 Press Enter to send • Ctrl+C to quit • Characters stream in real-time
 ```
 
 ## ⚙️ Technical Deep Dive
 
-### Backend Architecture (server.ts)
-```typescript
-// Core streaming implementation
-const stream = new ReadableStream({
-  start(controller) {
-    const response = generateResponse(message);
-    let index = 0;
-    
-    const interval = setInterval(() => {
-      if (index < response.length) {
-        controller.enqueue(response[index]);  // Send one character
-        index++;
-      } else {
-        controller.close();                   // End stream
-        clearInterval(interval);
-      }
-    }, 50);  // 50ms delay between characters
+### Backend architecture (`backend/server.ts`)
+
+#### Tool detection and execution
+
+```ts
+// Pattern matching for tool triggers
+function detectToolCall(message: string): ToolCall | null {
+  const patterns = [
+    { regex: /list files|show files|ls/i, command: "ls", args: ["-la"] },
+    { regex: /current directory|pwd/i, command: "pwd", args: [] },
+    { regex: /disk usage|df/i, command: "df", args: ["-h"] },
+    { regex: /system info|uname/i, command: "uname", args: ["-a"] },
+  ];
+
+  for (const pattern of patterns) {
+    if (pattern.regex.test(message)) {
+      return { command: pattern.command, args: pattern.args };
+    }
   }
-});
+  return null;
+}
+
+// Safe command execution with whitelisting
+async function executeTool(tool: ToolCall): Promise<string> {
+  const allowedCommands = ["ls", "pwd", "df", "uname"];
+
+  if (!allowedCommands.includes(tool.command)) {
+    return `Command '${tool.command}' is not allowed`;
+  }
+
+  // Execute using Bun's $ shell operator
+  const result = await $`${tool.command} ${tool.args}`.text();
+  return result.trim();
+}
 ```
 
-### Frontend Architecture (chat.go)
-```go
-// Bubble Tea message types for streaming
-type (
-    streamCharMsg string      // Single character received
-    streamEndMsg  struct{}    // Stream completed
-    streamErrMsg  string      // Error occurred
-)
+#### Streaming with tool markers
 
-// Update function handles all events
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-    switch msg := msg.(type) {
-    case streamCharMsg:
-        m.currentResponse += string(msg)  // Append character
-        return m, nil
-    case streamEndMsg:
-        m.messages = append(m.messages, "Bot: "+m.currentResponse)
-        m.streaming = false
-        return m, nil
-    }
+```ts
+// Tool execution flow in streaming response
+if (tool) {
+  // 1. Stream pre-message
+  const preMessage = `I'll execute the ${tool.command} command for you...\n\n`;
+  for (const char of preMessage) {
+    controller.enqueue(encoder.encode(char));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  // 2. Send tool start marker
+  controller.enqueue(encoder.encode(`[TOOL_START:${tool.command}]`));
+
+  // 3. Execute tool
+  const output = await executeTool(tool);
+
+  // 4. Send tool output
+  controller.enqueue(encoder.encode(`[TOOL_OUTPUT:${output}]`));
+
+  // 5. Send tool end marker
+  controller.enqueue(encoder.encode("[TOOL_END]"));
+
+  // 6. Stream analysis
+  const analysis = `\n\nBased on the output, ${analyzeToolOutput(tool.command, output)}`;
+  for (const char of analysis) {
+    controller.enqueue(encoder.encode(char));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
+```
+
+### Frontend architecture (`frontend/chat.go`)
+
+#### Tool message types
+
+```go
+// New message types for tool calls
+type (
+    streamCharMsg     string      // Regular character streaming
+    streamEndMsg      struct{}    // Stream completed
+    streamErrMsg      string      // Stream error
+    toolCallStartMsg  string      // Tool command being executed
+    toolCallOutputMsg string      // Tool output
+    toolCallEndMsg    struct{}    // Tool execution complete
+)
+```
+
+#### Tool stream parsing
+
+```go
+// In sendMessage goroutine - parse tool markers from stream
+bufferStr := buffer.String()
+
+// Tool start marker: [TOOL_START:ls]
+if strings.HasPrefix(bufferStr, "[TOOL_START:") && strings.Contains(bufferStr, "]") {
+    endIdx := strings.Index(bufferStr, "]")
+    toolCmd := bufferStr[12:endIdx] // Extract command
+    globalProgram.Send(toolCallStartMsg(toolCmd))
+    buffer.Reset()
+    continue
+}
+
+// Tool output marker: [TOOL_OUTPUT:file1.txt\nfile2.go]
+if strings.HasPrefix(bufferStr, "[TOOL_OUTPUT:") && strings.Contains(bufferStr, "]") {
+    endIdx := strings.Index(bufferStr, "]")
+    output := bufferStr[13:endIdx] // Extract output
+    globalProgram.Send(toolCallOutputMsg(output))
+    buffer.Reset()
+    continue
+}
+```
+
+#### Tool UI rendering
+
+```go
+// Handle tool messages in Update function
+case toolCallStartMsg:
+    m.currentResponse += fmt.Sprintf("\n\n🔧 Executing: %s\n", string(msg))
+    return m, nil
+
+case toolCallOutputMsg:
+    // Format tool output in code block
+    m.currentResponse += fmt.Sprintf("```\n%s\n```\n", string(msg))
+    return m, nil
+
+case toolCallEndMsg:
+    m.currentResponse += "\n"
+    return m, nil
 ```
 
 ## 🔧 Troubleshooting
 
-### 🔴 Backend Issues
+### Backend issues
 
-**Error: Port 3000 in use**
+- **Error: Port 3000 in use**
+
 ```bash
 lsof -ti:3000 | xargs kill -9    # Kill process on port 3000
 bun run dev                      # Restart server
 ```
 
-**Error: Bun command not found**
+- **Error: Bun command not found**
+
 ```bash
 curl -fsSL https://bun.sh/install | bash    # Install Bun
-source ~/.bashrc                             # Reload shell
+source ~/.bashrc                            # Reload shell
 ```
 
-### 🔴 Frontend Issues
+- **Error: Tool execution failed**
 
-**Error: Go modules not found**
+```bash
+# Check if commands are available
+ls --version
+pwd --version
+df --version
+uname --version
+```
+
+### Frontend issues
+
+- **Error: Go modules not found**
+
 ```bash
 cd frontend
-go mod tidy                      # Re-download dependencies
-go clean -modcache              # Clear module cache if needed
+go mod tidy                # Re-download dependencies
+go clean -modcache         # Clear module cache if needed
 ```
 
-**Error: Failed to connect to server**
+- **Error: Failed to connect to server**
+
 ```bash
 # Check if backend is running
 curl http://localhost:3000/health
-
-# Should return: {"status": "ok", "timestamp": "..."}
+# Should return: Server is running!
 ```
 
-### 🔴 Common Issues
+- **Error: Tool calls not working**
+
+```bash
+# Test tool detection manually
+curl -X POST http://localhost:3000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "list files"}'
+```
+
+### Common issues
 
 | Problem | Solution |
-|---------|----------|
-| No streaming effect | Ensure both frontend and backend are running |
-| UI looks broken | Resize terminal window (minimum 80x24) |
-| Characters appear too fast | Increase delay in `server.ts` (line with `50ms`) |
-| Terminal colors missing | Use modern terminal (iTerm2, Windows Terminal, etc.) |
+|---|---|
+| No tool execution | Try exact phrases: "list files", "current directory" |
+| Tool output garbled | Ensure terminal supports UTF-8 encoding |
+| Commands not found | Check if `ls`, `pwd`, `df`, `uname` are in PATH |
+| Permission denied | Some commands may require different permissions |
+| Streaming stops during tools | Backend might have crashed – check console |
 
 ## 🎯 Learning Outcomes
 
 After exploring this codebase, you'll understand:
 
-### 🧠 Core Concepts
-1. **Streaming HTTP Responses**: How to send data progressively without WebSockets
-2. **Event-Driven TUI**: Bubble Tea's Update/View architecture pattern
-3. **Terminal Styling**: Professional CLI interfaces with Lipgloss
-4. **Client-Server Communication**: REST API design for real-time applications
-5. **Concurrent Programming**: Goroutines for non-blocking HTTP streaming
+- **Streaming HTTP Responses**: How to send data progressively without WebSockets
+- **Event-Driven TUI**: Bubble Tea's Update/View architecture pattern
+- **Terminal Styling**: Professional CLI interfaces with Lipgloss
+- **Tool Execution**: Safe command execution with whitelisting
+- **Protocol Design**: Custom markers for tool communication
+- **Concurrent Programming**: Goroutines for non-blocking HTTP streaming
 
-### 🔍 OpenCode Connections
+## 🔍 OpenCode Connections
+
 - **TUI Architecture**: Similar to OpenCode's `packages/tui/` structure
 - **Streaming Responses**: How AI providers stream tokens to the interface
+- **Tool System**: How OpenCode executes tools and displays results
 - **State Management**: Event-driven updates for chat conversations
-- **Error Handling**: Graceful degradation when connections fail
-
-## 🚀 Next Steps
-
-### 🔬 Dive Deeper into OpenCode
-1. **Explore `packages/tui/`**: Compare TUI implementations
-2. **Study AI Provider Integration**: How OpenCode connects to GPT/Claude/etc.
-3. **Examine Tool System**: How OpenCode passes tools to AI models
-4. **Analyze Session Management**: Conversation persistence and context
-
-### 🛠️ Extend This Project
-1. **Add Authentication**: User login/logout system
-2. **Multiple Conversations**: Chat history with different sessions
-3. **File Upload**: Send files to the chat bot
-4. **Custom Themes**: Different color schemes and layouts
-5. **WebSocket Upgrade**: Replace HTTP streaming with WebSockets
-
-## 📚 Resources
-
-- [Bubble Tea Tutorial](https://github.com/charmbracelet/bubbletea/tree/master/tutorials)
-- [Lipgloss Examples](https://github.com/charmbracelet/lipgloss/tree/master/examples)  
-- [Bun Documentation](https://bun.sh/docs)
-- [OpenCode Repository](https://github.com/opencodeai/opencode)
-
----
-
-**🎯 Built for learning OpenCode's architecture** • **⚡ Real streaming responses** • **🎨 Beautiful terminal UI** • **🔄 Event-driven design**
-
-*Happy coding! 🚀*
+- **Security**: Command whitelisting and safe execution patterns
