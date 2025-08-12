@@ -50,6 +50,8 @@ chat-poc/
 │   └── chat.go               # Core TUI implementation with tool display
 │
 ├── resources/                # Additional assets
+│   ├── demo.cast
+│   ├── demo.gif  
 └── README.md                 # This documentation
 ```
 
