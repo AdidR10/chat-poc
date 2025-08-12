@@ -1,6 +1,7 @@
 package main
 
 import (
+    "bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,8 @@ type model struct {
 	messages        []string           // Chat history
 	streaming       bool               // Is currently receiving streamed response
 	currentResponse string             // Buffer for building current response (changed from strings.Builder)
+	currentTool     string  // NEW: Track current tool being executed
+    toolOutput      string  // NEW: Store tool output temporarily
 	width           int                // Terminal width
 	height          int                // Terminal height
 	err             error              // Last error
@@ -112,7 +115,7 @@ func (m model) Init() tea.Cmd {
 }
 
 // Update handles all events - this is the core of Bubble Tea's architecture
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {``
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
@@ -165,7 +168,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {``
 		m.currentResponse = ""  // Changed from Reset()
 		m.streaming = false
 		return m, nil
-	}
 
 	//New Cases:
 	case toolCallStartMsg:
@@ -294,29 +296,63 @@ func sendMessage(message string) tea.Cmd {
 		}
 
 		// Start streaming
+		// In sendMessage function, update the streaming goroutine:
 		go func() {
 			defer resp.Body.Close()
 			
-			// Read response in small chunks to simulate streaming
-			buf := make([]byte, 1)
+			var buffer strings.Builder
+			reader := bufio.NewReader(resp.Body)
+			
 			for {
-				n, err := resp.Body.Read(buf)
+				char, err := reader.ReadByte()
 				if err != nil {
 					if err == io.EOF {
-						if globalProgram != nil {
-							globalProgram.Send(streamEndMsg{})
+						// Process any remaining buffer
+						if buffer.Len() > 0 {
+							globalProgram.Send(streamCharMsg(buffer.String()))
 						}
+						globalProgram.Send(streamEndMsg{})
 						return
 					}
-					if globalProgram != nil {
-						globalProgram.Send(streamErrMsg("Stream read error: " + err.Error()))
-					}
+					globalProgram.Send(streamErrMsg("Stream read error: " + err.Error()))
 					return
 				}
 				
-				if n > 0 && globalProgram != nil {
-					globalProgram.Send(streamCharMsg(string(buf[:n])))
-					time.Sleep(time.Millisecond * 50) // Slightly longer delay to see streaming effect
+				buffer.WriteByte(char)
+				
+				// Check for tool markers
+				bufferStr := buffer.String()
+				
+				// Tool start marker
+				if strings.HasPrefix(bufferStr, "[TOOL_START:") && strings.Contains(bufferStr, "]") {
+					endIdx := strings.Index(bufferStr, "]")
+					toolCmd := bufferStr[12:endIdx] // Extract command between [TOOL_START: and ]
+					globalProgram.Send(toolCallStartMsg(toolCmd))
+					buffer.Reset()
+					continue
+				}
+				
+				// Tool output marker
+				if strings.HasPrefix(bufferStr, "[TOOL_OUTPUT:") && strings.Contains(bufferStr, "]") {
+					endIdx := strings.Index(bufferStr, "]")
+					output := bufferStr[13:endIdx] // Extract output between [TOOL_OUTPUT: and ]
+					globalProgram.Send(toolCallOutputMsg(output))
+					buffer.Reset()
+					continue
+				}
+				
+				// Tool end marker
+				if bufferStr == "[TOOL_END]" {
+					globalProgram.Send(toolCallEndMsg{})
+					buffer.Reset()
+					continue
+				}
+				
+				// Regular character streaming
+				if !strings.HasPrefix(bufferStr, "[") {
+					globalProgram.Send(streamCharMsg(string(char)))
+					buffer.Reset()
+					time.Sleep(time.Millisecond * 50)
 				}
 			}
 		}()
