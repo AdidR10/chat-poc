@@ -11,6 +11,68 @@ interface ChatResponse {
   reply: string;
 }
 
+// Tool call interface
+interface ToolCall {
+  command: string;
+  args: string[];
+}
+
+// Simple pattern matching for tool triggers
+function detectToolCall(message: string): ToolCall | null {
+  const patterns = [
+    { regex: /list files|show files|ls/i, command: "ls", args: ["-la"] },
+    { regex: /current directory|pwd/i, command: "pwd", args: [] },
+    { regex: /disk usage|df/i, command: "df", args: ["-h"] },
+    { regex: /system info|uname/i, command: "uname", args: ["-a"] },
+  ];
+
+  for (const pattern of patterns) {
+    if (pattern.regex.test(message)) {
+      return { command: pattern.command, args: pattern.args };
+    }
+  }
+  return null;
+}
+
+// Execute tool safely
+import { $ } from "bun";
+
+// Safe command execution with whitelisted commands
+async function executeTool(tool: ToolCall): Promise<string> {
+  try {
+    // Whitelist of allowed commands for safety
+    const allowedCommands = ["ls", "pwd", "df", "uname"];
+    
+    if (!allowedCommands.includes(tool.command)) {
+      return `Command '${tool.command}' is not allowed`;
+    }
+    
+    // Execute based on command
+    let result: string;
+    
+    switch(tool.command) {
+      case "ls":
+        result = await $`ls ${tool.args}`.text();
+        break;
+      case "pwd":
+        result = await $`pwd`.text();
+        break;
+      case "df":
+        result = await $`df ${tool.args}`.text();
+        break;
+      case "uname":
+        result = await $`uname ${tool.args}`.text();
+        break;
+      default:
+        result = "Command not implemented";
+    }
+    
+    return result.trim();
+  } catch (error: any) {
+    return `Error: ${error.message}`;
+  }
+}
+
 // Simple AI-like responses for demonstration
 const responses = [
   "That's an interesting question! Let me think about that...",
@@ -55,49 +117,64 @@ const server = Bun.serve({
     }
 
     // Chat endpoint with streaming response
-    if (url.pathname === '/chat' && req.method === 'POST') {
+      if (url.pathname === '/chat' && req.method === 'POST') {
       try {
-        const body = await req.json() as ChatRequest;
-        const { message } = body;
-
-        if (!message || typeof message !== 'string') {
-          return new Response('Invalid message', { 
-            status: 400, 
-            headers: corsHeaders 
-          });
-        }
-
-        console.log(`📨 Received message: "${message}"`);
-
-        // Generate response text
-        const responseText = generateResponse(message);
-
-        // Create streaming response (character by character)
+        const { message } = await req.json();
+      
+        // Create a ReadableStream for response
         const stream = new ReadableStream({
           async start(controller) {
-            console.log('🚀 Starting stream...');
+            const encoder = new TextEncoder();
             
-            // Stream each character with a delay to simulate real-time AI response
-            for (let i = 0; i < responseText.length; i++) {
-              const char = responseText[i];
-              controller.enqueue(new TextEncoder().encode(char));
+            // Check if message requires a tool
+            const tool = detectToolCall(message);
+            
+            if (tool) {
+              // Stream pre-tool message
+              const preMessage = `I'll execute the ${tool.command} command for you...\n\n`;
+              for (const char of preMessage) {
+                controller.enqueue(encoder.encode(char));
+                await new Promise(resolve => setTimeout(resolve, 20));
+              }
               
-              // 50ms delay between characters (configurable)
+              // Send tool call start marker
+              controller.enqueue(encoder.encode(`[TOOL_START:${tool.command}]`));
               await new Promise(resolve => setTimeout(resolve, 50));
+              
+              // Execute tool
+              const output = await executeTool(tool);
+              
+              // Send tool output
+              controller.enqueue(encoder.encode(`[TOOL_OUTPUT:${output}]`));
+              await new Promise(resolve => setTimeout(resolve, 50));
+              
+              // Send tool end marker
+              controller.enqueue(encoder.encode("[TOOL_END]"));
+              await new Promise(resolve => setTimeout(resolve, 50));
+              
+              // Stream post-tool analysis
+              const analysis = `\n\nBased on the output, ${analyzeToolOutput(tool.command, output)}`;
+              for (const char of analysis) {
+                controller.enqueue(encoder.encode(char));
+                await new Promise(resolve => setTimeout(resolve, 20));
+              }
+            } else {
+              // Normal response for non-tool messages
+              const response = generateResponse(message);
+              for (const char of response) {
+                controller.enqueue(encoder.encode(char));
+                await new Promise(resolve => setTimeout(resolve, 30));
+              }
             }
             
-            console.log('✅ Stream completed');
             controller.close();
           }
         });
 
         return new Response(stream, {
-          status: 200,
-          headers: {
-            ...corsHeaders,
-            'Content-Type': 'text/plain; charset=utf-8',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
+          headers: { 
+            "Content-Type": "text/plain",
+            "X-Content-Type-Options": "nosniff"
           }
         });
 
@@ -117,6 +194,22 @@ const server = Bun.serve({
     });
   }
 });
+
+
+// Simple analysis function
+function analyzeToolOutput(command: string, output: string): string {
+  switch(command) {
+    case "ls":
+      const fileCount = output.split('\n').length - 1;
+      return `I can see ${fileCount} items in the current directory.`;
+    case "pwd":
+      return `you're currently in the ${output} directory.`;
+    case "df":
+      return "here's your disk usage information.";
+    default:
+      return "the command has been executed successfully.";
+  }
+}
 
 console.log(`🚀 Chat server running on http://localhost:${server.port}`);
 console.log(`📡 Endpoints available:`);
