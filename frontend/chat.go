@@ -19,6 +19,11 @@ type (
 	streamCharMsg string      // Individual character received from stream
 	streamEndMsg  struct{}    // Stream completed
 	streamErrMsg  string      // Stream error occurred
+
+	// NEW TYPES for tool calls
+    toolCallStartMsg string  // Tool command being executed
+    toolCallOutputMsg string // Tool output
+    toolCallEndMsg struct{}  // Tool execution complete
 )
 
 // Main application model - similar to OpenCode's TUI state management
@@ -73,6 +78,14 @@ var (
 	helpStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#626262")).
 		Italic(true)
+
+	// Add new style for tool calls
+	toolCallStyle = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("#00CED1")).
+		Background(lipgloss.Color("#1a1a1a")).
+		Padding(1).
+		MarginBottom(1)
 )
 
 // Global program reference for streaming
@@ -99,7 +112,7 @@ func (m model) Init() tea.Cmd {
 }
 
 // Update handles all events - this is the core of Bubble Tea's architecture
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {``
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
@@ -151,6 +164,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages = append(m.messages, "Error: "+string(msg))
 		m.currentResponse = ""  // Changed from Reset()
 		m.streaming = false
+		return m, nil
+	}
+
+	//New Cases:
+	case toolCallStartMsg:
+		// Add tool call indicator to current response
+		m.currentResponse += fmt.Sprintf("\n\n🔧 Executing: %s\n", string(msg))
+		return m, nil
+		
+	case toolCallOutputMsg:
+		// Add tool output with special formatting
+		m.currentResponse += fmt.Sprintf("```\n%s\n```\n", string(msg))
+		return m, nil
+		
+	case toolCallEndMsg:
+		// Tool execution complete, continue normal streaming
+		m.currentResponse += "\n"
 		return m, nil
 	}
 
