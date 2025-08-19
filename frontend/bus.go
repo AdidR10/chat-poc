@@ -4,10 +4,16 @@ import "sync"
 
 var appBus *Bus
 
-// Event struct can hold any bus event
+// // Event struct can hold any bus event
+// type Event struct {
+// 	Type string
+// 	Data interface{}
+// }
+
 type Event struct {
-	Type string
-	Data interface{}
+    Type      string      `json:"type"`
+    Data      interface{} `json:"data"`
+    Timestamp int64       `json:"timestamp"`
 }
 
 type Bus struct {

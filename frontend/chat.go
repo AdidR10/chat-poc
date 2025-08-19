@@ -1,7 +1,7 @@
 package main
 
 import (
-    "bufio"
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -15,87 +15,62 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Message types for the Bubble Tea update cycle
-type (
-	streamCharMsg string      // Individual character received from stream
-	streamEndMsg  struct{}    // Stream completed
-	streamErrMsg  string      // Stream error occurred
+// ===============
+// New Event type (matches backend Bus JSON)
+// ===============
+// type Event struct {
+// 	Type      string      `json:"type"`
+// 	Data      interface{} `json:"data"`
+// 	Timestamp int64       `json:"timestamp"`
+// }
 
-	// NEW TYPES for tool calls
-    toolCallStartMsg string  // Tool command being executed
-    toolCallOutputMsg string // Tool output
-    toolCallEndMsg struct{}  // Tool execution complete
-)
-
-// Main application model - similar to OpenCode's TUI state management
+// Main application model
 type model struct {
-	textInput       textinput.Model    // User input component
-	messages        []string           // Chat history
-	streaming       bool               // Is currently receiving streamed response
-	currentResponse string             // Buffer for building current response (changed from strings.Builder)
-	currentTool     string  // NEW: Track current tool being executed
-    toolOutput      string  // NEW: Store tool output temporarily
-	width           int                // Terminal width
-	height          int                // Terminal height
-	err             error              // Last error
-	program         *tea.Program       // Reference to the program for sending messages
+	textInput       textinput.Model
+	messages        []string
+	streaming       bool
+	currentResponse string
+	width           int
+	height          int
+	err             error
+	program         *tea.Program
 	bus             *Bus
 }
 
-// Styles using Lipgloss - similar to OpenCode's terminal styling
+// Styles using Lipgloss
 var (
-	// Title bar style
 	titleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Background(lipgloss.Color("#7D56F4")).
-		Padding(0, 1)
+		Bold(true).Foreground(lipgloss.Color("#FAFAFA")).
+		Background(lipgloss.Color("#7D56F4")).Padding(0, 1)
 
-	// User message style (similar to OpenCode's user input styling)
 	userMessageStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#04B575")).
-		Padding(1).
-		MarginBottom(1)
+		Padding(1).MarginBottom(1)
 
-	// Bot message style (similar to OpenCode's AI response styling)
 	botMessageStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#FF6B6B")).
-		Padding(1).
-		MarginBottom(1)
+		Padding(1).MarginBottom(1)
 
-	// Streaming message style (special styling for real-time responses)
 	streamingMessageStyle = lipgloss.NewStyle().
 		Border(lipgloss.DoubleBorder()).
 		BorderForeground(lipgloss.Color("#FFD23F")).
-		Padding(1).
-		MarginBottom(1)
+		Padding(1).MarginBottom(1)
 
-	// Input box style
 	inputStyle = lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(lipgloss.Color("#874BFD")).
 		Padding(0, 1)
 
-	// Help text style
 	helpStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#626262")).
-		Italic(true)
-
-	// Add new style for tool calls
-	toolCallStyle = lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("#00CED1")).
-		Background(lipgloss.Color("#1a1a1a")).
-		Padding(1).
-		MarginBottom(1)
+		Foreground(lipgloss.Color("#626262")).Italic(true)
 )
 
-// Global program reference for streaming
+// Global program reference
 var globalProgram *tea.Program
 
-// Initialize the model - sets up the initial state
+// Initial model
 func initialModel(bus *Bus) model {
 	ti := textinput.New()
 	ti.Placeholder = "Type your message here..."
@@ -107,284 +82,182 @@ func initialModel(bus *Bus) model {
 		textInput: ti,
 		messages:  []string{},
 		streaming: false,
-		bus: bus,
+		bus:       bus,
 	}
 }
 
-// Init command - runs when the program starts
+// Init: subscribe to bus and forward all events into Bubble Tea
 func (m model) Init() tea.Cmd {
 	ch := m.bus.Subscribe()
 	go func() {
-        for evt := range ch {
-            switch evt.Type {
-            case "stream_char":
-                globalProgram.Send(streamCharMsg(evt.Data.(string)))
-            case "stream_end":
-                globalProgram.Send(streamEndMsg{})
-            case "stream_err":
-                globalProgram.Send(streamErrMsg(evt.Data.(string)))
-            case "tool_start":
-                globalProgram.Send(toolCallStartMsg(evt.Data.(string)))
-            case "tool_output":
-                globalProgram.Send(toolCallOutputMsg(evt.Data.(string)))
-            case "tool_end":
-                globalProgram.Send(toolCallEndMsg{})
-            }
-        }
-    }()
+		for evt := range ch {
+			// Send Event directly into Bubble Tea
+			globalProgram.Send(evt)
+		}
+	}()
 	return tea.Batch(textinput.Blink, tea.EnterAltScreen)
 }
 
-// Update handles all events - this is the core of Bubble Tea's architecture
+// Update: handle Bubble Tea messages and Events
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	switch msg := msg.(type) {
+	switch v := msg.(type) {
 	case tea.WindowSizeMsg:
-		// Handle terminal resize
-		m.width = msg.Width
-		m.height = msg.Height
+		m.width, m.height = v.Width, v.Height
 		return m, nil
 
 	case tea.KeyMsg:
-		switch msg.Type {
+		switch v.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
-			// Quit the application
 			return m, tea.Quit
-
 		case tea.KeyEnter:
-			// Send message if not currently streaming and input is not empty
 			if !m.streaming && strings.TrimSpace(m.textInput.Value()) != "" {
 				message := strings.TrimSpace(m.textInput.Value())
-				
-				// Add user message to history
 				m.messages = append(m.messages, "You: "+message)
-				
-				// Clear input and set streaming state
 				m.textInput.SetValue("")
 				m.streaming = true
-				
-				// Send message to backend
 				return m, sendMessage(message)
 			}
 		}
 
-	case streamCharMsg:
-		// Received a character from the stream
-		m.currentResponse += string(msg)  // Changed from WriteString to +=
-		return m, nil
-
-	case streamEndMsg:
-		// Stream completed successfully
-		if len(m.currentResponse) > 0 {  // Changed from m.currentResponse.Len()
-			m.messages = append(m.messages, "Bot: "+m.currentResponse)  // Changed from String()
+	case Event: // <-- Our Bus JSON events
+		switch v.Type {
+		case "chat.char":
+			if s, ok := v.Data.(string); ok {
+				m.currentResponse += s
+			}
+		case "chat.complete":
+			if len(m.currentResponse) > 0 {
+				m.messages = append(m.messages, "Bot: "+m.currentResponse)
+			}
+			m.currentResponse = ""
+			m.streaming = false
+		case "tool.start":
+			if data, ok := v.Data.(map[string]interface{}); ok {
+				m.currentResponse += fmt.Sprintf("\n\n🔧 Executing: %s\n", data["command"])
+			}
+		case "tool.output":
+			if s, ok := v.Data.(string); ok {
+				m.currentResponse += fmt.Sprintf("```\n%s\n```\n", s)
+			}
+		case "tool.end":
+			m.currentResponse += "\n"
+		case "stream_err":
+			if s, ok := v.Data.(string); ok {
+				m.messages = append(m.messages, "Error: "+s)
+			}
+			m.currentResponse = ""
+			m.streaming = false
 		}
-		m.currentResponse = ""  // Changed from Reset()
-		m.streaming = false
-		return m, nil
-
-	case streamErrMsg:
-		// Stream error occurred
-		m.messages = append(m.messages, "Error: "+string(msg))
-		m.currentResponse = ""  // Changed from Reset()
-		m.streaming = false
-		return m, nil
-
-	//New Cases:
-	case toolCallStartMsg:
-		// Add tool call indicator to current response
-		m.currentResponse += fmt.Sprintf("\n\n🔧 Executing: %s\n", string(msg))
-		return m, nil
-		
-	case toolCallOutputMsg:
-		// Add tool output with special formatting
-		m.currentResponse += fmt.Sprintf("```\n%s\n```\n", string(msg))
-		return m, nil
-		
-	case toolCallEndMsg:
-		// Tool execution complete, continue normal streaming
-		m.currentResponse += "\n"
-		return m, nil
 	}
 
-	// Update text input
 	m.textInput, cmd = m.textInput.Update(msg)
 	return m, cmd
 }
 
-// View renders the UI - similar to OpenCode's TUI rendering
+// View
 func (m model) View() string {
 	var b strings.Builder
+	b.WriteString(titleStyle.Render("💬 Chat POC - JSON Events") + "\n\n")
 
-	// Title
-	title := titleStyle.Render("💬 Chat POC - OpenCode Architecture Demo")
-	b.WriteString(title + "\n\n")
+	// Show messages
+	b.WriteString(m.renderMessages())
 
-	// Calculate available space for messages
-	contentHeight := m.height - 8 // Reserve space for title, input, and help
-	if contentHeight < 1 {
-		contentHeight = 10
-	}
-
-	// Message display area
-	messageArea := m.renderMessages()
-	b.WriteString(messageArea)
-
-	// Current streaming response (if any)
+	// Current streaming buffer
 	if m.streaming {
-		streamingText := "Bot: " + m.currentResponse + "▎" // Changed from String()
+		streamingText := "Bot: " + m.currentResponse + "▎"
 		streaming := streamingMessageStyle.Width(m.width - 4).Render(streamingText)
 		b.WriteString(streaming + "\n")
 	}
 
-	// Input area
+	// Input
 	b.WriteString("\n")
 	input := inputStyle.Width(m.width - 4).Render(m.textInput.View())
 	b.WriteString(input + "\n\n")
 
-	// Help text
-	help := helpStyle.Render("Press Enter to send • Ctrl+C to quit • Characters stream in real-time")
-	b.WriteString(help)
-
+	// Help line
+	b.WriteString(helpStyle.Render("Press Enter to send • Ctrl+C to quit"))
 	return b.String()
 }
 
-// renderMessages displays the chat history with proper styling
 func (m model) renderMessages() string {
 	var b strings.Builder
-	
-	// Show the last few messages to fit in the terminal
 	start := 0
-	maxMessages := 8 // Show last 8 messages
+	maxMessages := 8
 	if len(m.messages) > maxMessages {
 		start = len(m.messages) - maxMessages
 	}
-
 	for i := start; i < len(m.messages); i++ {
 		msg := m.messages[i]
 		width := m.width - 4
 		if width < 20 {
 			width = 20
 		}
-
 		if strings.HasPrefix(msg, "You:") {
-			styled := userMessageStyle.Width(width).Render(msg)
-			b.WriteString(styled + "\n")
+			b.WriteString(userMessageStyle.Width(width).Render(msg) + "\n")
 		} else if strings.HasPrefix(msg, "Bot:") {
-			styled := botMessageStyle.Width(width).Render(msg)
-			b.WriteString(styled + "\n")
+			b.WriteString(botMessageStyle.Width(width).Render(msg) + "\n")
 		} else {
-			// Error messages or other types
 			b.WriteString(msg + "\n")
 		}
 	}
-
 	return b.String()
 }
 
-// sendMessage sends a message to the backend and starts streaming response
+// ===============
+// sendMessage now decodes JSON per line (backend sends JSON.stringify(event)+"\n")
+// ===============
 func sendMessage(message string) tea.Cmd {
 	return func() tea.Msg {
-		// Prepare request payload
-		requestBody := map[string]string{
-			"message": message,
-		}
-		
-		jsonBody, err := json.Marshal(requestBody)
+		reqBody := map[string]string{"message": message}
+		jsonBody, err := json.Marshal(reqBody)
 		if err != nil {
-			return streamErrMsg("Failed to encode message")
+			return Event{Type: "stream_err", Data: "Failed to encode message"}
 		}
 
-		// Create HTTP request WITHOUT context timeout for streaming
 		req, err := http.NewRequest("POST", "http://localhost:3000/chat", bytes.NewBuffer(jsonBody))
 		if err != nil {
-			return streamErrMsg("Failed to create request")
+			return Event{Type: "stream_err", Data: "Failed to create request"}
 		}
 		req.Header.Set("Content-Type", "application/json")
 
-		// Send the request
-		client := &http.Client{
-			Timeout: 60 * time.Second, // Set timeout on client instead
-		}
+		client := &http.Client{Timeout: 60 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
-			return streamErrMsg("Failed to connect to server. Make sure backend is running on localhost:3000!")
+			return Event{Type: "stream_err", Data: "Failed to connect to server"}
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
-			return streamErrMsg(fmt.Sprintf("Server error: %s", resp.Status))
+			return Event{Type: "stream_err", Data: fmt.Sprintf("Server error: %s", resp.Status)}
 		}
 
-		// Start streaming
-		// In sendMessage function, update the streaming goroutine:
 		go func() {
 			defer resp.Body.Close()
-			
-			var buffer strings.Builder
 			reader := bufio.NewReader(resp.Body)
-			
 			for {
-				char, err := reader.ReadByte()
+				line, err := reader.ReadBytes('\n')
 				if err != nil {
 					if err == io.EOF {
-						// Process any remaining buffer
-						if buffer.Len() > 0 {
-							// globalProgram.Send(streamCharMsg(buffer.String()))
-							appBus.Publish(Event{Type: "stream_char", Data: string(char)})
-						}
-						// globalProgram.Send(streamEndMsg{})
 						appBus.Publish(Event{Type: "stream_end"})
 						return
 					}
-					// globalProgram.Send(streamErrMsg("Stream read error: " + err.Error()))
 					appBus.Publish(Event{Type: "stream_err", Data: err.Error()})
 					return
 				}
-				
-				buffer.WriteByte(char)
-				
-				// Check for tool markers
-				bufferStr := buffer.String()
-				
-				// Tool start marker
-				if strings.HasPrefix(bufferStr, "[TOOL_START:") && strings.Contains(bufferStr, "]") {
-					endIdx := strings.Index(bufferStr, "]")
-					toolCmd := bufferStr[12:endIdx] // Extract command between [TOOL_START: and ]
-					// globalProgram.Send(toolCallStartMsg(toolCmd))
-					appBus.Publish(Event{Type: "tool_start", Data: toolCmd})
-					buffer.Reset()
+
+				// decode JSON line
+				var evt Event
+				if err := json.Unmarshal(line, &evt); err != nil {
+					appBus.Publish(Event{Type: "stream_err", Data: "Invalid JSON: " + err.Error()})
 					continue
 				}
-				
-				// Tool output marker
-				if strings.HasPrefix(bufferStr, "[TOOL_OUTPUT:") && strings.Contains(bufferStr, "]") {
-					endIdx := strings.Index(bufferStr, "]")
-					output := bufferStr[13:endIdx] // Extract output between [TOOL_OUTPUT: and ]
-					// globalProgram.Send(toolCallOutputMsg(output))
-					appBus.Publish(Event{Type: "tool_output", Data: output})
-					buffer.Reset()
-					continue
-				}
-				
-				// Tool end marker
-				if bufferStr == "[TOOL_END]" {
-					// globalProgram.Send(toolCallEndMsg{})
-					appBus.Publish(Event{Type: "tool_end"})
-					buffer.Reset()
-					continue
-				}
-				
-				// Regular character streaming
-				if !strings.HasPrefix(bufferStr, "[") {
-					// globalProgram.Send(streamCharMsg(string(char)))
-					appBus.Publish(Event{Type: "stream_char", Data: string(char)})
-					buffer.Reset()
-					time.Sleep(time.Millisecond * 50)
-				}
+
+				// push into Bus
+				appBus.Publish(evt)
 			}
 		}()
-
 		return nil
 	}
 }

@@ -1,23 +1,60 @@
 /**
- * Simple chat server with streaming responses
- * Mirrors OpenCode's backend architecture with Bun runtime
+ * Chat backend with Bus architecture (OpenCode-inspired)
+ * Bun runtime
  */
 
-interface ChatRequest {
-  message: string;
+import { $ } from "bun";
+
+// ----------------------
+// 🚌 Event Bus
+// ----------------------
+export type Event<T = any> = {
+  type: string;
+  data?: T;
+  timestamp?: number;
+};
+
+type Subscriber = (event: Event) => void;
+
+class EventBus {
+  private subscribers: { [type: string]: Subscriber[] } = {};
+
+  subscribe(type: string, handler: Subscriber) {
+    if (!this.subscribers[type]) this.subscribers[type] = [];
+    this.subscribers[type].push(handler);
+    return () => {
+      this.subscribers[type] = this.subscribers[type].filter(h => h !== handler);
+    };
+  }
+
+  subscribeAll(handler: Subscriber) {
+    return this.subscribe("*", handler);
+  }
+
+  publish(event: Event) {
+    event.timestamp = Date.now();
+
+    if (this.subscribers[event.type]) {
+      for (const handler of this.subscribers[event.type]) handler(event);
+    }
+
+    if (this.subscribers["*"]) {
+      for (const handler of this.subscribers["*"]) handler(event);
+    }
+  }
 }
 
-interface ChatResponse {
-  reply: string;
-}
+export const Bus = new EventBus();
 
-// Tool call interface
+// ----------------------
+// 🛠 Tool Detection + Execution
+// ----------------------
+
 interface ToolCall {
   command: string;
   args: string[];
 }
 
-// Simple pattern matching for tool triggers
 function detectToolCall(message: string): ToolCall | null {
   const patterns = [
     { regex: /list files|show files|ls/i, command: "ls", args: ["-la"] },
@@ -25,7 +62,6 @@ function detectToolCall(message: string): ToolCall | null {
     { regex: /disk usage|df/i, command: "df", args: ["-h"] },
     { regex: /system info|uname/i, command: "uname", args: ["-a"] },
   ];
-
   for (const pattern of patterns) {
     if (pattern.regex.test(message)) {
       return { command: pattern.command, args: pattern.args };
@@ -34,23 +70,15 @@ function detectToolCall(message: string): ToolCall | null {
   return null;
 }
 
-// Execute tool safely
-import { $ } from "bun";
-
-// Safe command execution with whitelisted commands
 async function executeTool(tool: ToolCall): Promise<string> {
   try {
-    // Whitelist of allowed commands for safety
     const allowedCommands = ["ls", "pwd", "df", "uname"];
-    
     if (!allowedCommands.includes(tool.command)) {
       return `Command '${tool.command}' is not allowed`;
     }
-    
-    // Execute based on command
+
     let result: string;
-    
-    switch(tool.command) {
+    switch (tool.command) {
       case "ls":
         result = await $`ls ${tool.args}`.text();
         break;
@@ -66,14 +94,16 @@ async function executeTool(tool: ToolCall): Promise<string> {
       default:
         result = "Command not implemented";
     }
-    
     return result.trim();
   } catch (error: any) {
     return `Error: ${error.message}`;
   }
 }
 
-// Simple AI-like responses for demonstration
+// ----------------------
+// 🤖 AI-like Fake Responses
+// ----------------------
+
 const responses = [
   "That's an interesting question! Let me think about that...",
   "I understand what you're asking. Here's my perspective:",
@@ -87,132 +117,134 @@ function generateResponse(message: string): string {
   return `${randomResponse} You said: "${message}". This is a streaming response that demonstrates real-time character-by-character delivery similar to OpenCode's architecture.`;
 }
 
-const server = Bun.serve({
-  port: 3000,
-  
-  async fetch(req: Request): Promise<Response> {
-    const url = new URL(req.url);
-    
-    // CORS headers for cross-origin requests
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    };
-
-    // Handle CORS preflight requests
-    if (req.method === 'OPTIONS') {
-      return new Response(null, { 
-        status: 200, 
-        headers: corsHeaders 
-      });
-    }
-
-    // Health check endpoint
-    if (url.pathname === '/health' && req.method === 'GET') {
-      return new Response('Server is running!', { 
-        status: 200, 
-        headers: corsHeaders 
-      });
-    }
-
-    // Chat endpoint with streaming response
-      if (url.pathname === '/chat' && req.method === 'POST') {
-      try {
-        const { message } = await req.json();
-      
-        // Create a ReadableStream for response
-        const stream = new ReadableStream({
-          async start(controller) {
-            const encoder = new TextEncoder();
-            
-            // Check if message requires a tool
-            const tool = detectToolCall(message);
-            
-            if (tool) {
-              // Stream pre-tool message
-              const preMessage = `I'll execute the ${tool.command} command for you...\n\n`;
-              for (const char of preMessage) {
-                controller.enqueue(encoder.encode(char));
-                await new Promise(resolve => setTimeout(resolve, 20));
-              }
-              
-              // Send tool call start marker
-              controller.enqueue(encoder.encode(`[TOOL_START:${tool.command}]`));
-              await new Promise(resolve => setTimeout(resolve, 50));
-              
-              // Execute tool
-              const output = await executeTool(tool);
-              
-              // Send tool output
-              controller.enqueue(encoder.encode(`[TOOL_OUTPUT:${output}]`));
-              await new Promise(resolve => setTimeout(resolve, 50));
-              
-              // Send tool end marker
-              controller.enqueue(encoder.encode("[TOOL_END]"));
-              await new Promise(resolve => setTimeout(resolve, 50));
-              
-              // Stream post-tool analysis
-              const analysis = `\n\nBased on the output, ${analyzeToolOutput(tool.command, output)}`;
-              for (const char of analysis) {
-                controller.enqueue(encoder.encode(char));
-                await new Promise(resolve => setTimeout(resolve, 20));
-              }
-            } else {
-              // Normal response for non-tool messages
-              const response = generateResponse(message);
-              for (const char of response) {
-                controller.enqueue(encoder.encode(char));
-                await new Promise(resolve => setTimeout(resolve, 30));
-              }
-            }
-            
-            controller.close();
-          }
-        });
-
-        return new Response(stream, {
-          headers: { 
-            "Content-Type": "text/plain",
-            "X-Content-Type-Options": "nosniff"
-          }
-        });
-
-      } catch (error) {
-        console.error('❌ Error processing chat request:', error);
-        return new Response('Internal server error', { 
-          status: 500, 
-          headers: corsHeaders 
-        });
-      }
-    }
-
-    // Default 404 response
-    return new Response('Not Found', { 
-      status: 404, 
-      headers: corsHeaders 
-    });
-  }
-});
-
-
-// Simple analysis function
 function analyzeToolOutput(command: string, output: string): string {
-  switch(command) {
-    case "ls":
-      const fileCount = output.split('\n').length - 1;
+  switch (command) {
+    case "ls": {
+      const fileCount = output.split("\n").length - 1;
       return `I can see ${fileCount} items in the current directory.`;
+    }
     case "pwd":
-      return `you're currently in the ${output} directory.`;
+      return `You're currently in the ${output} directory.`;
     case "df":
-      return "here's your disk usage information.";
+      return "Here's your disk usage information.";
     default:
-      return "the command has been executed successfully.";
+      return "The command has been executed successfully.";
   }
 }
 
+// ----------------------
+// 🌐 HTTP Server
+// ----------------------
+
+const server = Bun.serve({
+  port: 3000,
+
+  async fetch(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+
+    // CORS headers
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    };
+
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 200, headers: corsHeaders });
+    }
+
+    // Health check
+    if (url.pathname === "/health" && req.method === "GET") {
+      return new Response("Server is running!", { status: 200, headers: corsHeaders });
+    }
+
+    // ----------------------
+    // CHAT Endpoint
+    // ----------------------
+    if (url.pathname === "/chat" && req.method === "POST") {
+      try {
+        const { message } = await req.json();
+
+        // The HTTP stream subscribes to Bus
+        const stream = new ReadableStream({
+          async start(controller) {
+            const encoder = new TextEncoder();
+
+            // Subscribe to all events and forward to client
+            const unsubscribe = Bus.subscribeAll((event) => {
+              // You can choose to send raw JSON events or plain text per event
+              controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+            });
+
+            // --- Logic starts ---
+            const tool = detectToolCall(message);
+
+            if (tool) {
+              Bus.publish({ type: "system.info", data: `Executing ${tool.command}...` });
+              Bus.publish({ type: "tool.start", data: { command: tool.command } });
+
+              const output = await executeTool(tool);
+
+              Bus.publish({ type: "tool.output", data: output });
+              Bus.publish({ type: "tool.end", data: { command: tool.command } });
+
+              // "AI-like" analysis of tool output
+              const analysis = analyzeToolOutput(tool.command, output);
+              for (const char of `\n\nBased on tool output: ${analysis}`) {
+                Bus.publish({ type: "chat.char", data: char });
+                await new Promise((r) => setTimeout(r, 20));
+              }
+            } else {
+              // Normal response (simulated AI streaming)
+              const response = generateResponse(message);
+              for (const char of response) {
+                Bus.publish({ type: "chat.char", data: char });
+                await new Promise((r) => setTimeout(r, 30));
+              }
+            }
+
+            Bus.publish({ type: "chat.complete" });
+
+            unsubscribe();
+            controller.close();
+          },
+        });
+
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Content-Type-Options": "nosniff",
+          },
+        });
+      } catch (error) {
+        console.error("❌ Error processing chat request:", error);
+        return new Response("Internal server error", { status: 500, headers: corsHeaders });
+      }
+    }
+
+    return new Response("Not Found", { status: 404, headers: corsHeaders });
+  },
+});
+
+// ----------------------
+// 🔌 Extra Subscribers (examples)
+// ----------------------
+
+// Log all events
+Bus.subscribeAll((event) => {
+  console.log("📨 Event:", event.type, event.data);
+});
+
+// Example: Persist chat messages
+Bus.subscribe("chat.char", (event) => {
+  // save to DB (demo: console.log)
+  // appendMessageToDB(event.data)
+});
+
 console.log(`🚀 Chat server running on http://localhost:${server.port}`);
-console.log(`📡 Endpoints available:`);
-console.log(`   GET  /health - Health check`);
-console.log(`   POST /chat   - Send chat message (streams response)`);
-console.log(`💡 Architecture: Similar to OpenCode's backend with streaming responses`);
+console.log("📡 Endpoints available:");
+console.log("   GET  /health - Health check");
+console.log("   POST /chat   - Send chat message (streams Bus events)");
+console.log("💡 Architecture: EventBus-powered backend (OpenCode-style)");
