@@ -9,21 +9,39 @@ A streaming chat application demonstrating OpenCode's real-time TUI architecture
 ## Chat POC Demo
 ![Terminal Demo](resources/demo.gif)
 
+---
+
 ## 🏗️ Architecture Overview
 
-This project replicates OpenCode's client-server streaming pattern with tool execution:
+This project replicates OpenCode's **Bus-powered backend** pattern with a TUI frontend that consumes **structured JSON events**.
 
 ```text
-┌─────────────────┐    HTTP POST /chat    ┌─────────────────┐
-│   Go Frontend   │◄─────────────────────►│   TypeScript     │
-│                 │                        │     Backend      │
-│ • Bubble Tea    │    Streaming chars     │ • Bun Server     │
-│ • Lipgloss      │    ←←←←←←←←←←←←←←←←    │ • Port 3000      │
-│ • Text Input    │                        │ • /chat API      │
-│ • Chat History  │                        │                  │
-└─────────────────┘                        └─────────────────┘
+User (TUI) 
+   │
+   ▼
+[Go TUI] --(HTTP POST /chat)--> [Bun Backend]
+   │                               │
+   │                               ▼
+   │                       [ Event Bus 🚌 ]
+   │                               │
+   │                  ┌────────────┴───────────┐
+   │                  │                        │
+   │         [Tool Executor]            [AI/Text Generator]
+   │                  │                        │
+   │                  ▼                        ▼
+   │           Bus.publish()            Bus.publish()
+   │                  │                        │
+   │                  └────────────┬───────────┘
+   │                               │
+   │        Bus subscribers (HTTP stream writer, loggers, analytics)
+   │                               │
+   │<---------------- JSON Events (line by line) ----------------> 
+   │
+[Go TUI] ← reads JSON events, decodes into `Event` struct   
+   │
+   ▼
+Bubble Tea Update() → updates model state → View() re-renders chat
 ```
-
 ## ✨ Key Features
 
 - **🔄 Real-time Streaming**: Watch responses appear character-by-character like ChatGPT
@@ -54,6 +72,70 @@ chat-poc/
 │   ├── demo.gif  
 └── README.md                 # This documentation
 ```
+
+## ✨ Key Highlights
+
+### ⭐ Bus in Bun Backend
+- Implemented central EventBus (`bus.ts`) with publish/subscribe
+- Tool executor and AI-like response generator publish events
+- The HTTP stream writer is just one subscriber
+- Other subscribers can be added (logging, persistence, analytics) with zero changes to core logic
+- Ensures loose coupling and extensibility
+
+**Example backend event:**
+```json
+{"type":"tool.output","data":"-rw-r--r--  file1.txt","timestamp":1700000003}
+```
+
+### 🔄 Before vs After
+
+#### Before (No Bus)
+- `/chat` handler wrote directly to `controller.enqueue()`
+- Markers like `[TOOL_START:...]`, `[TOOL_OUTPUT:...]`
+- Only HTTP stream could consume events
+- Tight coupling
+
+#### After (With Bus 🚌)
+- `/chat` handler publishes events to Bus
+- HTTP stream subscribes and forwards events line-by-line JSON
+- TUI decodes JSON events into Event
+- Other subscribers (logs, DB, monitoring) can be plugged in easily
+- Decoupled, extensible, structured
+
+### 📟 TUI Adjustments (Go)
+
+**Old:** Expected raw characters and custom `[TOOL_*]` markers.
+
+**New:** Reads JSON events line-by-line. Example:
+```json
+{"type":"chat.char","data":"H"}
+{"type":"tool.start","data":{"command":"ls"}}
+{"type":"tool.output","data":"-rw-r--r-- file1.txt"}
+{"type":"chat.complete"}
+```
+
+- Added Event struct in Go (`Type`, `Data`, `Timestamp`)
+- Updated `sendMessage` → decode JSON into Event → publish into `appBus`
+- Updated `Update()` → switch on `evt.Type` (`chat.char`, `chat.complete`, `tool.start`, `tool.output`, ...)
+- Removed ad‑hoc bracket parsing logic
+
+### ✅ Summary (Before vs After)
+
+```
+BEFORE:
+TUI <--> Backend
+- Direct enqueue with markers like [TOOL_START]
+- One consumer (the client)
+- Tight coupling
+
+AFTER:
+TUI <--> Backend (Bus-powered JSON events)
+- Backend publishes structured events to Bus
+- HTTP stream subscribes and forwards JSON lines
+- TUI decodes JSON events, updates state
+- Flexible, decoupled, extensible
+```
+
 
 ## 🛠️ Prerequisites
 
@@ -177,133 +259,35 @@ Press Enter to send • Ctrl+C to quit • Characters stream in real-time
 
 ## ⚙️ Technical Deep Dive
 
-### Backend architecture (`backend/server.ts`)
+### Backend (Bun)
 
 #### Tool detection and execution
+- Tool detection → `detectToolCall()`
+- Execution via Bun’s `$` operator (with whitelist)
+- Publishes Bus events:
 
 ```ts
-// Pattern matching for tool triggers
-function detectToolCall(message: string): ToolCall | null {
-  const patterns = [
-    { regex: /list files|show files|ls/i, command: "ls", args: ["-la"] },
-    { regex: /current directory|pwd/i, command: "pwd", args: [] },
-    { regex: /disk usage|df/i, command: "df", args: ["-h"] },
-    { regex: /system info|uname/i, command: "uname", args: ["-a"] },
-  ];
-
-  for (const pattern of patterns) {
-    if (pattern.regex.test(message)) {
-      return { command: pattern.command, args: pattern.args };
-    }
-  }
-  return null;
-}
-
-// Safe command execution with whitelisting
-async function executeTool(tool: ToolCall): Promise<string> {
-  const allowedCommands = ["ls", "pwd", "df", "uname"];
-
-  if (!allowedCommands.includes(tool.command)) {
-    return `Command '${tool.command}' is not allowed`;
-  }
-
-  // Execute using Bun's $ shell operator
-  const result = await $`${tool.command} ${tool.args}`.text();
-  return result.trim();
-}
+Bus.publish({ type: "tool.start", data: { command: "ls" } })
+Bus.publish({ type: "tool.output", data: "-rw-r--r--  file1.txt" })
+Bus.publish({ type: "chat.char", data: "H" })
+Bus.publish({ type: "chat.complete" })
 ```
 
-#### Streaming with tool markers
+- HTTP stream subscribes and forwards these JSON events
 
-```ts
-// Tool execution flow in streaming response
-if (tool) {
-  // 1. Stream pre-message
-  const preMessage = `I'll execute the ${tool.command} command for you...\n\n`;
-  for (const char of preMessage) {
-    controller.enqueue(encoder.encode(char));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
+### Frontend (Go TUI)
 
-  // 2. Send tool start marker
-  controller.enqueue(encoder.encode(`[TOOL_START:${tool.command}]`));
+#### sendMessage
+- Sends user input to backend
+- Reads JSON lines from response
+- Unmarshals into `Event`
+- Publishes into `appBus`
 
-  // 3. Execute tool
-  const output = await executeTool(tool);
-
-  // 4. Send tool output
-  controller.enqueue(encoder.encode(`[TOOL_OUTPUT:${output}]`));
-
-  // 5. Send tool end marker
-  controller.enqueue(encoder.encode("[TOOL_END]"));
-
-  // 6. Stream analysis
-  const analysis = `\n\nBased on the output, ${analyzeToolOutput(tool.command, output)}`;
-  for (const char of analysis) {
-    controller.enqueue(encoder.encode(char));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-```
-
-### Frontend architecture (`frontend/chat.go`)
-
-#### Tool message types
-
-```go
-// New message types for tool calls
-type (
-    streamCharMsg     string      // Regular character streaming
-    streamEndMsg      struct{}    // Stream completed
-    streamErrMsg      string      // Stream error
-    toolCallStartMsg  string      // Tool command being executed
-    toolCallOutputMsg string      // Tool output
-    toolCallEndMsg    struct{}    // Tool execution complete
-)
-```
-
-#### Tool stream parsing
-
-```go
-// In sendMessage goroutine - parse tool markers from stream
-bufferStr := buffer.String()
-
-// Tool start marker: [TOOL_START:ls]
-if strings.HasPrefix(bufferStr, "[TOOL_START:") && strings.Contains(bufferStr, "]") {
-    endIdx := strings.Index(bufferStr, "]")
-    toolCmd := bufferStr[12:endIdx] // Extract command
-    globalProgram.Send(toolCallStartMsg(toolCmd))
-    buffer.Reset()
-    continue
-}
-
-// Tool output marker: [TOOL_OUTPUT:file1.txt\nfile2.go]
-if strings.HasPrefix(bufferStr, "[TOOL_OUTPUT:") && strings.Contains(bufferStr, "]") {
-    endIdx := strings.Index(bufferStr, "]")
-    output := bufferStr[13:endIdx] // Extract output
-    globalProgram.Send(toolCallOutputMsg(output))
-    buffer.Reset()
-    continue
-}
-```
-
-#### Tool UI rendering
-
-```go
-// Handle tool messages in Update function
-case toolCallStartMsg:
-    m.currentResponse += fmt.Sprintf("\n\n🔧 Executing: %s\n", string(msg))
-    return m, nil
-
-case toolCallOutputMsg:
-    // Format tool output in code block
-    m.currentResponse += fmt.Sprintf("```\n%s\n```\n", string(msg))
-    return m, nil
-
-case toolCallEndMsg:
-    m.currentResponse += "\n"
-    return m, nil
-```
+#### Update handles events
+- `"chat.char"` → appends characters live
+- `"tool.start"` → render tool execution header
+- `"tool.output"` → display results in code block
+- `"chat.complete"` → finalize Bot message
 
 ## 🔧 Troubleshooting
 
