@@ -39,6 +39,7 @@ type model struct {
 	height          int                // Terminal height
 	err             error              // Last error
 	program         *tea.Program       // Reference to the program for sending messages
+	bus             *Bus
 }
 
 // Styles using Lipgloss - similar to OpenCode's terminal styling
@@ -95,7 +96,7 @@ var (
 var globalProgram *tea.Program
 
 // Initialize the model - sets up the initial state
-func initialModel() model {
+func initialModel(bus *Bus) model {
 	ti := textinput.New()
 	ti.Placeholder = "Type your message here..."
 	ti.Focus()
@@ -106,11 +107,31 @@ func initialModel() model {
 		textInput: ti,
 		messages:  []string{},
 		streaming: false,
+		bus: bus,
 	}
 }
 
 // Init command - runs when the program starts
 func (m model) Init() tea.Cmd {
+	ch := m.bus.Subscribe()
+	go func() {
+        for evt := range ch {
+            switch evt.Type {
+            case "stream_char":
+                globalProgram.Send(streamCharMsg(evt.Data.(string)))
+            case "stream_end":
+                globalProgram.Send(streamEndMsg{})
+            case "stream_err":
+                globalProgram.Send(streamErrMsg(evt.Data.(string)))
+            case "tool_start":
+                globalProgram.Send(toolCallStartMsg(evt.Data.(string)))
+            case "tool_output":
+                globalProgram.Send(toolCallOutputMsg(evt.Data.(string)))
+            case "tool_end":
+                globalProgram.Send(toolCallEndMsg{})
+            }
+        }
+    }()
 	return tea.Batch(textinput.Blink, tea.EnterAltScreen)
 }
 
@@ -309,12 +330,15 @@ func sendMessage(message string) tea.Cmd {
 					if err == io.EOF {
 						// Process any remaining buffer
 						if buffer.Len() > 0 {
-							globalProgram.Send(streamCharMsg(buffer.String()))
+							// globalProgram.Send(streamCharMsg(buffer.String()))
+							appBus.Publish(Event{Type: "stream_char", Data: string(char)})
 						}
-						globalProgram.Send(streamEndMsg{})
+						// globalProgram.Send(streamEndMsg{})
+						appBus.Publish(Event{Type: "stream_end"})
 						return
 					}
-					globalProgram.Send(streamErrMsg("Stream read error: " + err.Error()))
+					// globalProgram.Send(streamErrMsg("Stream read error: " + err.Error()))
+					appBus.Publish(Event{Type: "stream_err", Data: err.Error()})
 					return
 				}
 				
@@ -327,7 +351,8 @@ func sendMessage(message string) tea.Cmd {
 				if strings.HasPrefix(bufferStr, "[TOOL_START:") && strings.Contains(bufferStr, "]") {
 					endIdx := strings.Index(bufferStr, "]")
 					toolCmd := bufferStr[12:endIdx] // Extract command between [TOOL_START: and ]
-					globalProgram.Send(toolCallStartMsg(toolCmd))
+					// globalProgram.Send(toolCallStartMsg(toolCmd))
+					appBus.Publish(Event{Type: "tool_start", Data: toolCmd})
 					buffer.Reset()
 					continue
 				}
@@ -336,21 +361,24 @@ func sendMessage(message string) tea.Cmd {
 				if strings.HasPrefix(bufferStr, "[TOOL_OUTPUT:") && strings.Contains(bufferStr, "]") {
 					endIdx := strings.Index(bufferStr, "]")
 					output := bufferStr[13:endIdx] // Extract output between [TOOL_OUTPUT: and ]
-					globalProgram.Send(toolCallOutputMsg(output))
+					// globalProgram.Send(toolCallOutputMsg(output))
+					appBus.Publish(Event{Type: "tool_output", Data: output})
 					buffer.Reset()
 					continue
 				}
 				
 				// Tool end marker
 				if bufferStr == "[TOOL_END]" {
-					globalProgram.Send(toolCallEndMsg{})
+					// globalProgram.Send(toolCallEndMsg{})
+					appBus.Publish(Event{Type: "tool_end"})
 					buffer.Reset()
 					continue
 				}
 				
 				// Regular character streaming
 				if !strings.HasPrefix(bufferStr, "[") {
-					globalProgram.Send(streamCharMsg(string(char)))
+					// globalProgram.Send(streamCharMsg(string(char)))
+					appBus.Publish(Event{Type: "stream_char", Data: string(char)})
 					buffer.Reset()
 					time.Sleep(time.Millisecond * 50)
 				}

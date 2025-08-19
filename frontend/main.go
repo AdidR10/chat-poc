@@ -8,9 +8,11 @@ import (
 )
 
 func main() {
+	appBus = NewBus()
+
 	// Initialize the TUI program with the initial model
 	// WithAltScreen() creates a full-screen terminal application
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	p := tea.NewProgram(initialModel(appBus), tea.WithAltScreen())
 	
 	// Set global program reference for streaming
 	globalProgram = p
